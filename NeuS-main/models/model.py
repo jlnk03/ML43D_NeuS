@@ -116,14 +116,6 @@ class PointTransformerSeg(nn.Module):
             channel = 32 * 2 ** i
             self.transition_ups.append(TransitionUp(channel * 2, channel, channel))
             self.transformers.append(TransformerBlock(channel, cfg.model.transformer_dim, nneighbor))
-
-        self.fc3 = nn.Sequential(
-            nn.Linear(32, 64),
-            nn.ReLU(),
-            nn.Linear(64, 64),
-            nn.ReLU(),
-            nn.Linear(64, n_c)
-        )
     
     def forward(self, x):
         points, xyz_and_feats = self.backbone(x)
@@ -134,8 +126,7 @@ class PointTransformerSeg(nn.Module):
             points = self.transition_ups[i](xyz, points, xyz_and_feats[- i - 2][0], xyz_and_feats[- i - 2][1])
             xyz = xyz_and_feats[- i - 2][0]
             points = self.transformers[i](xyz, points)[0]
-            
-        return self.fc3(points)
 
+        return points
 
     
