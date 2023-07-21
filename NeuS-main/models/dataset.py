@@ -109,6 +109,78 @@ class Dataset:
         rays_o = self.pose_all[img_idx, None, None, :3, 3].expand(rays_v.shape)  # W, H, 3
         return rays_o.transpose(0, 1), rays_v.transpose(0, 1)
 
+    @staticmethod
+    def adjust_contrast(original_image, contrast_factor):
+        """
+        Adjust the contrast of the input image.
+        """
+        # Ensure contrast_factor is a float tensor
+        contrast_factor = torch.tensor(contrast_factor, dtype=torch.float32, device=original_image.device)
+        # Calculate the mean of the original image along the (width, height) axes
+        mean = original_image.mean(dim=(-2, -1), keepdim=True)
+
+        # Adjust contrast by centering at the mean and scaling by contrast_factor
+        adjusted_image = (original_image - mean) * contrast_factor + mean
+        return adjusted_image
+
+    @staticmethod
+    def adjust_brightness(original_image, brightness_delta):
+        """
+        Adjust the brightness of the input image.
+        """
+        # Ensure brightness_delta is a float tensor
+        brightness_delta = torch.tensor(brightness_delta, dtype=torch.float32, device=original_image.device)
+
+        # Adjust brightness by adding the delta
+        adjusted_image = original_image + brightness_delta
+        return adjusted_image
+
+    def gen_random_rays_at_with_adjustments(self, img_idx, batch_size, contrast_factor, brightness_delta):
+        """
+        Generate random rays at world space from multiple cameras with different image adjustments.
+        """
+
+        
+
+        pixels_x = torch.randint(low=0, high=self.W, size=[batch_size])
+        pixels_y = torch.randint(low=0, high=self.H, size=[batch_size])
+
+        img_idx = img_idx.cpu()
+        pixels_y = pixels_y.cpu()
+        pixels_x = pixels_x.cpu()
+
+        original_image = self.images[img_idx]
+        contrast_adjusted_image = self.adjust_contrast(original_image, contrast_factor)
+        brightness_adjusted_image = self.adjust_brightness(original_image, brightness_delta)
+
+        original_color = original_image[(pixels_y, pixels_x)]    # batch_size, 3
+        contrast_adjusted_color = contrast_adjusted_image[(pixels_y, pixels_x)]   # batch_size, 3
+        brightness_adjusted_color = brightness_adjusted_image[(pixels_y, pixels_x)]    # batch_size, 3
+
+        mask = self.masks[img_idx][(pixels_y, pixels_x)]      # batch_size, 3
+
+        # back to gpu
+        img_idx = img_idx.to(self.device)
+        pixels_y = pixels_y.to(self.device)
+        pixels_x = pixels_x.to(self.device)
+
+        def get_rand_rays(color):
+            p = torch.stack([pixels_x, pixels_y, torch.ones_like(pixels_y)], dim=-1).float()  # batch_size, 3
+            p = torch.matmul(self.intrinsics_all_inv[img_idx, None, :3, :3], p[:, :, None]).squeeze() # batch_size, 3
+            rays_v = p / torch.linalg.norm(p, ord=2, dim=-1, keepdim=True)    # batch_size, 3
+            rays_v = torch.matmul(self.pose_all[img_idx, None, :3, :3], rays_v[:, :, None]).squeeze()  # batch_size, 3
+            rays_o = self.pose_all[img_idx, None, :3, 3].expand(rays_v.shape) # batch_size, 3
+
+            return torch.cat([rays_o.cpu(), rays_v.cpu(), color, mask[:, :1]], dim=-1).cuda()
+
+        rays_original = get_rand_rays(original_color)
+        rays_contrast_adjusted = get_rand_rays(contrast_adjusted_color)
+        rays_brightness_adjusted = get_rand_rays(brightness_adjusted_color)
+
+        rays = [rays_original, rays_contrast_adjusted, rays_brightness_adjusted]
+
+        return rays
+
     def gen_random_rays_at(self, img_idx, batch_size):
         """
         Generate random rays at world space from one camera.

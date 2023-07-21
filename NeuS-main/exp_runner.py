@@ -16,6 +16,7 @@ from models.dataset import Dataset
 from models.fields import RenderingNetwork, SDFNetwork, SingleVarianceNetwork, NeRF
 from models.renderer import NeuSRenderer
 
+from models.photometrics_mlp import PhotometricsMLP
 
 class Runner:
     def __init__(self, conf_path, mode='train', case='CASE_NAME', is_continue=False):
@@ -59,10 +60,12 @@ class Runner:
 
         # Networks
         params_to_train = []
+        self.photometrics_mlp = PhotometricsMLP(**self.conf['model.photometrics_mlp'])
         self.nerf_outside = NeRF(**self.conf['model.nerf']).to(self.device)
         self.sdf_network = SDFNetwork(**self.conf['model.sdf_network']).to(self.device)
         self.deviation_network = SingleVarianceNetwork(**self.conf['model.variance_network']).to(self.device)
         self.color_network = RenderingNetwork(**self.conf['model.rendering_network']).to(self.device)
+        params_to_train += list(self.photometrics_mlp.parameters())
         params_to_train += list(self.nerf_outside.parameters())
         params_to_train += list(self.sdf_network.parameters())
         params_to_train += list(self.deviation_network.parameters())
@@ -101,10 +104,41 @@ class Runner:
         res_step = self.end_iter - self.iter_step
         image_perm = self.get_image_perm()
 
-        for iter_i in tqdm(range(res_step)):
-            data = self.dataset.gen_random_rays_at(image_perm[self.iter_step % len(image_perm)], self.batch_size)
+        torch.autograd.set_detect_anomaly(True)
 
-            rays_o, rays_d, true_rgb, mask = data[:, :3], data[:, 3: 6], data[:, 6: 9], data[:, 9: 10]
+        def sample_float_value(min_value, max_value):
+            return np.random.uniform(min_value, max_value)
+        
+        # Define the range for contrast factor and brightness delta
+        min_contrast_factor = 0.5
+        max_contrast_factor = 2.0
+
+        min_brightness_delta = -0.2
+        max_brightness_delta = 0.2
+
+        for iter_i in tqdm(range(res_step)):
+            img_idx_list = image_perm[self.iter_step % len(image_perm)] 
+
+            contrast_factor = sample_float_value(min_contrast_factor, max_contrast_factor)
+            brightness_delta = sample_float_value(min_brightness_delta, max_brightness_delta)
+
+            # Get current contrast_factor and brightness_delta values
+            # contrast_factor = self.photometrics_mlp.contrast_factor.item()
+            # brightness_delta = self.photometrics_mlp.brightness_delta.item()
+
+
+            # Pass the current values of contrast_factor and brightness_delta as inputs
+            data = self.dataset.gen_random_rays_at_with_adjustments(img_idx_list, self.batch_size, contrast_factor, brightness_delta)
+            rays_group1 = data[0]
+            rays_group2 = data[1]
+            rays_group3 = data[2]
+
+            # Put the rays_group1, rays_group2, rays_group3 into a a torch tensor
+            ray = torch.cat([rays_group1, rays_group2, rays_group3], dim=1)
+            rays_combined = self.photometrics_mlp(data)
+
+            # Continue with the rays_combined data
+            rays_o, rays_d, true_rgb, mask = rays_combined[:, :3], rays_combined[:, 3: 6], rays_combined[:, 6: 9], rays_combined[:, 9: 10]
             near, far = self.dataset.near_far_from_sphere(rays_o, rays_d)
 
             background_rgb = None
@@ -208,6 +242,7 @@ class Runner:
 
     def load_checkpoint(self, checkpoint_name):
         checkpoint = torch.load(os.path.join(self.base_exp_dir, 'checkpoints', checkpoint_name), map_location=self.device)
+        self.photometrics_mlp.load_state_dict(checkpoint['photometrics_mlp'])
         self.nerf_outside.load_state_dict(checkpoint['nerf'])
         self.sdf_network.load_state_dict(checkpoint['sdf_network_fine'])
         self.deviation_network.load_state_dict(checkpoint['variance_network_fine'])
@@ -219,6 +254,7 @@ class Runner:
 
     def save_checkpoint(self):
         checkpoint = {
+            'photometrics_mlp': self.photometrics_mlp.state_dict(),
             'nerf': self.nerf_outside.state_dict(),
             'sdf_network_fine': self.sdf_network.state_dict(),
             'variance_network_fine': self.deviation_network.state_dict(),

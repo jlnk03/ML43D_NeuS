@@ -60,11 +60,11 @@ After running the commands above, a sparse point cloud is saved in `${data_dir}/
 
 The raw sparse point cloud may be noisy and may not be appropriate to define a region of interest (The white frame indicates the bounding box of the point cloud):
 
-![raw_sparse_points](static/raw_sparse_points.png)
+![raw_sparse_points](./static/raw_sparse_points.png)
 
 And you may need to clean it by yourself (here we use Meshlab to clean it manually). After cleaning:
 
-![interest_sparse_points](static/interest_sparse_points.png)
+![interest_sparse_points](./static/interest_sparse_points.png)
 
 Save it as `${data_dir}/sparse_points_interest.ply`.
 
