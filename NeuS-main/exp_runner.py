@@ -68,8 +68,6 @@ class Runner:
         # self.pointTransformer = PointTransformerV2().to(self.device)
         self.nerf_outside = NeRF(**self.conf['model.nerf']).to(self.device)
 
-        # Adding the PhotometricsMLP for the photometrics layer
-        self.photometrics_mlp = PhotometricsMLP(input_dim=10).to(self.device)
 
         ### Adding Point Transformer and NERF into one class
 
@@ -86,7 +84,6 @@ class Runner:
         # params_to_train += list(self.pointTransformer.parameters())
         # params_to_train += list(self.nerf_outside.parameters())
 
-        params_to_train += list(self.photometrics_mlp.parameters())
         params_to_train += list(self.combined_model.parameters())
         params_to_train += list(self.sdf_network.parameters())
         params_to_train += list(self.deviation_network.parameters())
@@ -133,17 +130,10 @@ class Runner:
         image_perm = self.get_image_perm()
 
         for iter_i in tqdm(range(res_step)):
-            # data = self.dataset.gen_random_rays_at(image_perm[self.iter_step % len(image_perm)], self.batch_size)
-            data = self.dataset.gen_random_rays_from_photometric_alterations(image_perm[self.iter_step % len(image_perm)], self.batch_size)
-            rays_group1 = data[:self.batch_size]
-            rays_group2 = data[self.batch_size: 2 * self.batch_size]
-            rays_group3 = data[2 * self.batch_size:]
-
-            # Pass the three groups of rays through the photometrics_mlp
-            rays_combined = self.photometrics_mlp([rays_group1, rays_group2, rays_group3])
+            data = self.dataset.gen_random_rays_at(image_perm[self.iter_step % len(image_perm)], self.batch_size)
 
             # Continue with the rays_combined data
-            rays_o, rays_d, true_rgb, mask = rays_combined[:, :3], rays_combined[:, 3: 6], rays_combined[:, 6: 9], rays_combined[:, 9: 10]
+            rays_o, rays_d, true_rgb, mask =  data[:, :3], data[:, 3: 6], data[:, 6: 9], data[:, 9: 10]
             near, far = self.dataset.near_far_from_sphere(rays_o, rays_d)
 
             background_rgb = None
