@@ -7,3 +7,7 @@ tqdm #==4.50.2
 torch #== 1.8.0
 scipy #==1.7.0
 PyMCubes==0.1.2
+torch-geometric
+torch-scatter
+einops
+timm
