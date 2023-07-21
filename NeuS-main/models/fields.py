@@ -210,14 +210,18 @@ class NeRF(nn.Module):
         # create the attention layer after the point linear layers
         self.pts_attention = MultiheadAttention(W, num_heads)
 
+        ### end of attention layers
+
+        self.skips = skips
+        self.use_viewdirs = use_viewdirs
+
+        ### attention layers
+
         if self.use_viewdirs:
             # create the attention layer after the view linear layers
             self.view_attention = MultiheadAttention(W // 2, num_heads)
 
         ### end of attention layers
-
-        self.skips = skips
-        self.use_viewdirs = use_viewdirs
 
         self.pts_linears = nn.ModuleList(
             [nn.Linear(self.input_ch, W)] +
