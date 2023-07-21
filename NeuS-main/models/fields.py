@@ -185,7 +185,7 @@ class NeRF(nn.Module):
                  output_ch=4,
                  skips=[4],
                  use_viewdirs=False,
-                 num_heads=4):
+                 num_heads=1):
         super(NeRF, self).__init__()
         self.D = D
         self.W = W
