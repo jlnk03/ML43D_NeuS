@@ -246,7 +246,7 @@ class NeRF(nn.Module):
             input_views = self.embed_fn_view(input_views)
 
         ### apply trasnformer to input_pts
-        inut_pts = self.transformer(input_pts)
+        input_pts = self.transformer(input_pts)
 
         h = input_pts
         for i, l in enumerate(self.pts_linears):
