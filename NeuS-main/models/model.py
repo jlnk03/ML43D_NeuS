@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from pointnet_util import PointNetFeaturePropagation, PointNetSetAbstraction
+from models.pointnet_util import PointNetFeaturePropagation, PointNetSetAbstraction
 from .transformer import TransformerBlock
 
 

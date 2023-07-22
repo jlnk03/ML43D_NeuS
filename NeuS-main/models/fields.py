@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from models.embedder import get_embedder
-from model import PointTransformerSeg
+from models.model import PointTransformerSeg
 import os
 import yaml
 
@@ -205,7 +205,7 @@ class NeRF(nn.Module):
             conf = yaml.safe_load(f)
 
         # Use the configuration to initialize the transformer
-        self.transformer = PointTransformerSeg(conf)
+        self.transformer = PointTransformerSeg(**conf)
 
         if multires > 0:
             embed_fn, input_ch = get_embedder(multires, input_dims=d_in)
