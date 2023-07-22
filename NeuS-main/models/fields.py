@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from models.embedder import get_embedder
+from model import PointTransformerSeg
 
 
 # This implementation is borrowed from IDR: https://github.com/lioryariv/idr
@@ -193,6 +194,7 @@ class NeRF(nn.Module):
         self.input_ch_view = 3
         self.embed_fn = None
         self.embed_fn_view = None
+        self.transformer = PointTransformerSeg()
 
         if multires > 0:
             embed_fn, input_ch = get_embedder(multires, input_dims=d_in)
@@ -231,6 +233,9 @@ class NeRF(nn.Module):
             input_pts = self.embed_fn(input_pts)
         if self.embed_fn_view is not None:
             input_views = self.embed_fn_view(input_views)
+
+        ### apply trasnformer to input_pts
+        inut_pts = self.transformer(input_pts)
 
         h = input_pts
         for i, l in enumerate(self.pts_linears):
