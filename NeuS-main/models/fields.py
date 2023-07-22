@@ -4,6 +4,8 @@ import torch.nn.functional as F
 import numpy as np
 from models.embedder import get_embedder
 from model import PointTransformerSeg
+import os
+import yaml
 
 
 # This implementation is borrowed from IDR: https://github.com/lioryariv/idr
@@ -194,7 +196,16 @@ class NeRF(nn.Module):
         self.input_ch_view = 3
         self.embed_fn = None
         self.embed_fn_view = None
-        self.transformer = PointTransformerSeg()
+
+        # Get the path to the configuration file
+        conf_path = os.path.join(os.path.dirname(__file__), 'confs', 'partseg.yaml')
+
+        # Load the configuration file
+        with open(conf_path, 'r') as f:
+            conf = yaml.safe_load(f)
+
+        # Use the configuration to initialize the transformer
+        self.transformer = PointTransformerSeg(conf)
 
         if multires > 0:
             embed_fn, input_ch = get_embedder(multires, input_dims=d_in)
