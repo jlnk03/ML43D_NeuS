@@ -2,6 +2,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+### NERF Transformer
+
 # sin-cose embedding module
 class Embedder(nn.Module):
     def __init__(self, **kwargs):
