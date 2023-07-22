@@ -8,6 +8,8 @@ from icecream import ic
 from scipy.spatial.transform import Rotation as Rot
 from scipy.spatial.transform import Slerp
 
+import torchvision.transforms.functional as F_tv
+
 
 # This function is borrowed from IDR: https://github.com/lioryariv/idr
 def load_K_Rt_from_P(filename, P=None):
@@ -109,42 +111,70 @@ class Dataset:
         rays_o = self.pose_all[img_idx, None, None, :3, 3].expand(rays_v.shape)  # W, H, 3
         return rays_o.transpose(0, 1), rays_v.transpose(0, 1)
 
-    def gen_random_rays_from_photometric_alterations(self, img_idx, batch_size):
-        """
-        Generate random rays at world space from one camera.
-        """
 
-        def adjust_contrast(img, factor):
-            # Adjust the contrast of the image
-            return torch.clamp((img - 0.5) * factor + 0.5, 0.0, 1.0)
+    def gen_random_rays_at_with_adjustments(self, img_idx, batch_size):
+        """
+        Generate random rays at world space from multiple cameras with different image adjustments.
+        """
+        pixels_x = torch.randint(low=0, high=self.W, size=[batch_size])
+        pixels_y = torch.randint(low=0, high=self.H, size=[batch_size])
 
-        def adjust_brightness(img, factor):
-            # Adjust the brightness of the image
-            return torch.clamp(img * factor, 0.0, 1.0)
-    
-        def get_rays_from_image(image):
-            # Generate rays from an image
-            pixels_x = torch.randint(low=0, high=self.W, size=[batch_size])
-            pixels_y = torch.randint(low=0, high=self.H, size=[batch_size])
-            color = image[(pixels_y, pixels_x)]    # batch_size, 3
-            mask = self.masks[img_idx][(pixels_y, pixels_x)]      # batch_size, 3
-            p = torch.stack([pixels_x, pixels_y, torch.ones_like(pixels_y)], dim=-1).float()  # batch_size, 3
-            p = torch.matmul(self.intrinsics_all_inv[img_idx, None, :3, :3], p[:, :, None]).squeeze() # batch_size, 3
-            rays_v = p / torch.linalg.norm(p, ord=2, dim=-1, keepdim=True)    # batch_size, 3
-            rays_v = torch.matmul(self.pose_all[img_idx, None, :3, :3], rays_v[:, :, None]).squeeze()  # batch_size, 3
-            rays_o = self.pose_all[img_idx, None, :3, 3].expand(rays_v.shape) # batch_size, 3
-            return torch.cat([rays_o.cpu(), rays_v.cpu(), color, mask[:, :1]], dim=-1).cuda()    # batch_size, 10
+        img_idx = img_idx.cpu()
+        pixels_y = pixels_y.cpu()
+        pixels_x = pixels_x.cpu()
 
         original_image = self.images[img_idx]
-        contrast_adjusted_image = adjust_contrast(original_image, torch.rand(batch_size) * 0.4 + 0.8)  # Random contrast factor between 0.8 and 1.2
-        brightness_adjusted_image = adjust_brightness(original_image, torch.rand(batch_size) * 0.4 + 0.8)  # Random brightness factor between 0.8 and 1.2
 
-        rays_original = get_rays_from_image(original_image)
-        rays_contrast_adjusted = get_rays_from_image(contrast_adjusted_image)
-        rays_brightness_adjusted = get_rays_from_image(brightness_adjusted_image)
+        # Convert the batch of images to the format expected by torchvision (batch_size, color, h, w)
+        dim_corrected_original_img = original_image.permute(2, 0, 1)
 
-        return torch.cat([rays_original, rays_contrast_adjusted, rays_brightness_adjusted], dim=0)
+        # Perform brightness adjustment using torchvision's function
+        darker_image = F_tv.adjust_brightness(dim_corrected_original_img, 0.5)
+        brighter_image = F_tv.adjust_brightness(dim_corrected_original_img, 1.5)
+        low_constrast_image = F_tv.adjust_contrast(dim_corrected_original_img, 0.5)
+        high_contrast_image = F_tv.adjust_contrast(dim_corrected_original_img, 1.5)
+        blurred_image = F_tv.adjust_sharpness(dim_corrected_original_img, 0.5)
+        sharper_image = F_tv.adjust_sharpness(dim_corrected_original_img, 1.5)
+        flat_image = F_tv.adjust_saturation(dim_corrected_original_img, 0.5)
+        saturated_image = F_tv.adjust_saturation(dim_corrected_original_img, 1.5)
 
+        # Convert the adjusted batch back to the original format (batch_size, w, h, color)
+        darker_image = darker_image.permute(1, 2, 0)
+        brighter_image = brighter_image.permute(1, 2, 0)
+        low_constrast_image = low_constrast_image.permute(1, 2, 0)
+        high_contrast_image = high_contrast_image.permute(1, 2, 0)
+        blurred_image = blurred_image.permute(1, 2, 0)
+        sharper_image = sharper_image.permute(1, 2, 0)
+        flat_image = flat_image.permute(1, 2, 0)
+        saturated_image = saturated_image.permute(1, 2, 0)
+
+        original_color = original_image[(pixels_y, pixels_x)]    # batch_size, 3
+        dark_color = darker_image[(pixels_y, pixels_x)]   # batch_size, 3
+        bright_color = brighter_image[(pixels_y, pixels_x)]    # batch_size, 3
+        low_contrast_color = low_constrast_image[(pixels_y, pixels_x)]    # batch_size, 3
+        high_contrast_color = high_contrast_image[(pixels_y, pixels_x)]    # batch_size, 3
+        blurred_color = blurred_image[(pixels_y, pixels_x)]    # batch_size, 3
+        sharp_color = sharper_image[(pixels_y, pixels_x)]    # batch_size, 3
+        flat_color = flat_image[(pixels_y, pixels_x)]    # batch_size, 3
+        saturated_color = saturated_image[(pixels_y, pixels_x)]    # batch_size, 3
+
+        mask = self.masks[img_idx][(pixels_y, pixels_x)]      # batch_size, 3
+
+        # back to gpu
+        img_idx = img_idx.to(self.device)
+        pixels_y = pixels_y.to(self.device)
+        pixels_x = pixels_x.to(self.device)
+
+        p = torch.stack([pixels_x, pixels_y, torch.ones_like(pixels_y)], dim=-1).float()  # batch_size, 3
+        p = torch.matmul(self.intrinsics_all_inv[img_idx, None, :3, :3], p[:, :, None]).squeeze() # batch_size, 3
+        rays_v = p / torch.linalg.norm(p, ord=2, dim=-1, keepdim=True)    # batch_size, 3
+        rays_v = torch.matmul(self.pose_all[img_idx, None, :3, :3], rays_v[:, :, None]).squeeze()  # batch_size, 3
+        rays_o = self.pose_all[img_idx, None, :3, 3].expand(rays_v.shape) # batch_size, 3
+
+        rays_and_mask = torch.cat([rays_o.cpu(), rays_v.cpu(), mask[:, :1]], dim=-1).cuda()
+        colors = torch.cat([original_color, dark_color, bright_color, low_contrast_color, high_contrast_color, blurred_color, sharp_color, flat_color, saturated_color], dim=-1).cuda()
+        
+        return rays_and_mask, colors
 
     def gen_random_rays_at(self, img_idx, batch_size):
         """

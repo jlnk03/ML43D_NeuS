@@ -3,7 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from models.embedder import get_embedder
-from torch.nn import MultiheadAttention
 
 
 # This implementation is borrowed from IDR: https://github.com/lioryariv/idr
@@ -184,8 +183,7 @@ class NeRF(nn.Module):
                  multires_view=0,
                  output_ch=4,
                  skips=[4],
-                 use_viewdirs=False,
-                 num_heads=1):
+                 use_viewdirs=False):
         super(NeRF, self).__init__()
         self.D = D
         self.W = W
@@ -206,22 +204,8 @@ class NeRF(nn.Module):
             self.embed_fn_view = embed_fn_view
             self.input_ch_view = input_ch_view
 
-        ### attention layers
-        # create the attention layer after the point linear layers
-        self.pts_attention = MultiheadAttention(W, num_heads)
-
-        ### end of attention layers
-
         self.skips = skips
         self.use_viewdirs = use_viewdirs
-
-        ### attention layers
-
-        if self.use_viewdirs:
-            # create the attention layer after the view linear layers
-            self.view_attention = MultiheadAttention(W // 2, num_heads)
-
-        ### end of attention layers
 
         self.pts_linears = nn.ModuleList(
             [nn.Linear(self.input_ch, W)] +
@@ -255,8 +239,6 @@ class NeRF(nn.Module):
             if i in self.skips:
                 h = torch.cat([input_pts, h], -1)
 
-        h, _ = self.pts_attention(h, h, h)  # apply attention
-
         if self.use_viewdirs:
             alpha = self.alpha_linear(h)
             feature = self.feature_linear(h)
@@ -265,8 +247,6 @@ class NeRF(nn.Module):
             for i, l in enumerate(self.views_linears):
                 h = self.views_linears[i](h)
                 h = F.relu(h)
-
-            h, _ = self.view_attention(h, h, h)  # apply attention
 
             rgb = self.rgb_linear(h)
             return alpha, rgb
