@@ -166,8 +166,8 @@ class NeuSRenderer:
         dist = (next_z_vals - prev_z_vals)
         prev_esti_sdf = mid_sdf - cos_val * dist * 0.5
         next_esti_sdf = mid_sdf + cos_val * dist * 0.5
-        prev_cdf = torch.sigmoid(prev_esti_sdf * inv_s)
-        next_cdf = torch.sigmoid(next_esti_sdf * inv_s)
+        prev_cdf = (torch.tanh(prev_esti_sdf * inv_s)+1)/2
+        next_cdf = (torch.tanh(next_esti_sdf * inv_s)+1)/2
         alpha = (prev_cdf - next_cdf + 1e-5) / (prev_cdf + 1e-5)
         weights = alpha * torch.cumprod(
             torch.cat([torch.ones([batch_size, 1]), 1. - alpha + 1e-7], -1), -1)[:, :-1]
@@ -238,8 +238,8 @@ class NeuSRenderer:
         estimated_next_sdf = sdf + iter_cos * dists.reshape(-1, 1) * 0.5
         estimated_prev_sdf = sdf - iter_cos * dists.reshape(-1, 1) * 0.5
 
-        prev_cdf = torch.sigmoid(estimated_prev_sdf * inv_s)
-        next_cdf = torch.sigmoid(estimated_next_sdf * inv_s)
+        prev_cdf = (torch.tanh(estimated_prev_sdf * inv_s)+1)/2
+        next_cdf = (torch.tanh(estimated_next_sdf * inv_s)+1)/2
 
         p = prev_cdf - next_cdf
         c = prev_cdf
