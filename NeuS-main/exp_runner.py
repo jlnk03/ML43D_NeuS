@@ -147,7 +147,8 @@ class Runner:
 
                 eikonal_loss = gradient_error
 
-                mask_loss = F.binary_cross_entropy(weight_sum.clip(1e-3, 1.0 - 1e-3), mask)
+                # mask_loss = F.binary_cross_entropy(weight_sum.clip(1e-3, 1.0 - 1e-3), mask)
+                mask_loss = F.binary_cross_entropy_with_logits(weight_sum, mask)
 
                 loss = color_fine_loss + \
                        eikonal_loss * self.igr_weight + \
