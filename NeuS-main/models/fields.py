@@ -3,127 +3,144 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from models.embedder import get_embedder
-from models.model import PointTransformerSeg
-import os
-import yaml
-# from omegaconf import DictConfig
-# import hydra
-
-
-# @hydra.main(config_path=os.path.join(os.path.dirname(__file__), 'confs'), config_name='partseg')
-# def init_transformer(cfg : DictConfig) -> None:
-#     transformer = PointTransformerSeg(cfg)
-#     return transformer
-
+import math
 
 # This implementation is borrowed from IDR: https://github.com/lioryariv/idr
+# class SDFNetwork(nn.Module):
+#     def __init__(self,
+#                  d_in,
+#                  d_out,
+#                  d_hidden,
+#                  n_layers,
+#                  skip_in=(4,),
+#                  multires=0,
+#                  bias=0.5,
+#                  scale=1,
+#                  geometric_init=True,
+#                  weight_norm=True,
+#                  inside_outside=False):
+#         super(SDFNetwork, self).__init__()
+#
+#         dims = [d_in] + [d_hidden for _ in range(n_layers)] + [d_out]
+#
+#         self.embed_fn_fine = None
+#
+#         if multires > 0:
+#             embed_fn, input_ch = get_embedder(multires, input_dims=d_in)
+#             self.embed_fn_fine = embed_fn
+#             dims[0] = input_ch
+#
+#         self.num_layers = len(dims)
+#         self.skip_in = skip_in
+#         self.scale = scale
+#
+#         for l in range(0, self.num_layers - 1):
+#             if l + 1 in self.skip_in:
+#                 out_dim = dims[l + 1] - dims[0]
+#             else:
+#                 out_dim = dims[l + 1]
+#
+#             lin = nn.Linear(dims[l], out_dim)
+#
+#             if geometric_init:
+#                 if l == self.num_layers - 2:
+#                     if not inside_outside:
+#                         torch.nn.init.normal_(lin.weight, mean=np.sqrt(np.pi) / np.sqrt(dims[l]), std=0.0001)
+#                         torch.nn.init.constant_(lin.bias, -bias)
+#                     else:
+#                         torch.nn.init.normal_(lin.weight, mean=-np.sqrt(np.pi) / np.sqrt(dims[l]), std=0.0001)
+#                         torch.nn.init.constant_(lin.bias, bias)
+#                 elif multires > 0 and l == 0:
+#                     torch.nn.init.constant_(lin.bias, 0.0)
+#                     torch.nn.init.constant_(lin.weight[:, 3:], 0.0)
+#                     torch.nn.init.normal_(lin.weight[:, :3], 0.0, np.sqrt(2) / np.sqrt(out_dim))
+#                 elif multires > 0 and l in self.skip_in:
+#                     torch.nn.init.constant_(lin.bias, 0.0)
+#                     torch.nn.init.normal_(lin.weight, 0.0, np.sqrt(2) / np.sqrt(out_dim))
+#                     torch.nn.init.constant_(lin.weight[:, -(dims[0] - 3):], 0.0)
+#                 else:
+#                     torch.nn.init.constant_(lin.bias, 0.0)
+#                     torch.nn.init.normal_(lin.weight, 0.0, np.sqrt(2) / np.sqrt(out_dim))
+#
+#             if weight_norm:
+#                 lin = nn.utils.weight_norm(lin)
+#
+#             setattr(self, "lin" + str(l), lin)
+#
+#         self.activation = nn.Softplus(beta=100)
+#
+#     def forward(self, inputs):
+#         inputs = inputs * self.scale
+#         if self.embed_fn_fine is not None:
+#             inputs = self.embed_fn_fine(inputs)
+#
+#         x = inputs
+#         for l in range(0, self.num_layers - 1):
+#             lin = getattr(self, "lin" + str(l))
+#
+#             if l in self.skip_in:
+#                 x = torch.cat([x, inputs], 1) / np.sqrt(2)
+#
+#             x = lin(x)
+#
+#             if l < self.num_layers - 2:
+#                 x = self.activation(x)
+#         return torch.cat([x[:, :1] / self.scale, x[:, 1:]], dim=-1)
+
 class SDFNetwork(nn.Module):
-    def __init__(self,
-                 d_in,
-                 d_out,
-                 d_hidden,
-                 n_layers,
-                 skip_in=(4,),
-                 multires=0,
-                 bias=0.5,
-                 scale=1,
-                 geometric_init=True,
-                 weight_norm=True,
-                 inside_outside=False):
+    def __init__(self, d_in, d_out, d_hidden, n_layers, skip_in=(4,), multires=0, bias=0.5, scale=1,
+                 geometric_init=True, weight_norm=True, inside_outside=False):
         super(SDFNetwork, self).__init__()
 
-        print("sdf d_in: ", d_in)
-        print("sdf d_out: ", d_out)
-
-        dims = [d_in] + [d_hidden for _ in range(n_layers)] + [d_out]
-
-        self.embed_fn_fine = None
-
-        if multires > 0:
-            embed_fn, input_ch = get_embedder(multires, input_dims=d_in)
-            self.embed_fn_fine = embed_fn
-            dims[0] = input_ch
-
-        self.num_layers = len(dims)
+        self.num_layers = n_layers
         self.skip_in = skip_in
         self.scale = scale
+        self.d_k = d_hidden
+        self.latent_dim = 64
 
-        # Get the path to the configuration file
-        conf_path = os.path.join(os.path.dirname(__file__), 'confs', 'partseg.yaml')
-
-        # Load the configuration file
-        with open(conf_path, 'r') as f:
-            conf = yaml.safe_load(f)
-
-        # Initialize the transformer using the hydra configuration
-        self.transformer = PointTransformerSeg(conf)
-
-        for l in range(0, self.num_layers - 1):
-            if l + 1 in self.skip_in:
-                out_dim = dims[l + 1] - dims[0]
+        # Encoder layers
+        self.encoder = nn.ModuleList()
+        for i in range(n_layers):
+            if i == 0:
+                self.encoder.append(nn.Linear(d_in, d_hidden))
             else:
-                out_dim = dims[l + 1]
+                self.encoder.append(nn.Linear(d_hidden, d_hidden))
 
-            lin = nn.Linear(dims[l], out_dim)
+        self.encoder.append(nn.Linear(d_hidden, self.latent_dim))
 
-            if geometric_init:
-                if l == self.num_layers - 2:
-                    if not inside_outside:
-                        torch.nn.init.normal_(lin.weight, mean=np.sqrt(np.pi) / np.sqrt(dims[l]), std=0.0001)
-                        torch.nn.init.constant_(lin.bias, -bias)
-                    else:
-                        torch.nn.init.normal_(lin.weight, mean=-np.sqrt(np.pi) / np.sqrt(dims[l]), std=0.0001)
-                        torch.nn.init.constant_(lin.bias, bias)
-                elif multires > 0 and l == 0:
-                    torch.nn.init.constant_(lin.bias, 0.0)
-                    torch.nn.init.constant_(lin.weight[:, 3:], 0.0)
-                    torch.nn.init.normal_(lin.weight[:, :3], 0.0, np.sqrt(2) / np.sqrt(out_dim))
-                elif multires > 0 and l in self.skip_in:
-                    torch.nn.init.constant_(lin.bias, 0.0)
-                    torch.nn.init.normal_(lin.weight, 0.0, np.sqrt(2) / np.sqrt(out_dim))
-                    torch.nn.init.constant_(lin.weight[:, -(dims[0] - 3):], 0.0)
-                else:
-                    torch.nn.init.constant_(lin.bias, 0.0)
-                    torch.nn.init.normal_(lin.weight, 0.0, np.sqrt(2) / np.sqrt(out_dim))
+        # Decoder layers
+        self.decoder = nn.ModuleList()
 
-            if weight_norm:
-                lin = nn.utils.weight_norm(lin)
+        self.decoder.append(nn.Linear(self.latent_dim, d_hidden))
 
-            setattr(self, "lin" + str(l), lin)
+        for i in range(n_layers):
+            if i == n_layers - 1:
+                self.decoder.append(nn.Linear(d_hidden, d_out))
+            else:
+                self.decoder.append(nn.Linear(d_hidden, d_hidden))
+
+        # Attention mechanism
+        self.attention = nn.Linear(self.latent_dim, self.latent_dim)
 
         self.activation = nn.Softplus(beta=100)
 
     def forward(self, inputs):
-
-        # print(f'sdf input shape pre: {inputs.shape}')
-
-        inputs = self.transformer(inputs)
-
-        inputs = inputs * self.scale
-
-        # print(f'sdf input shape post: {inputs.shape}')
-
-        inputs = inputs.reshape(-1, 3)
-
-        if self.embed_fn_fine is not None:
-            inputs = self.embed_fn_fine(inputs)
-
+        # Encoding
         x = inputs
+        for layer in self.encoder:
+            x = self.activation(layer(x))
 
-        # print(f'sdf input shape: {x.shape}')
+        # Self-attention
+        q = self.attention(x)  # Query
+        k = self.attention(x)  # Key
+        v = x  # Value
+        attn_weights = F.softmax(q @ k.transpose(-2, -1) / math.sqrt(self.latent_dim), dim=-1)
+        x = attn_weights @ v
 
-        # x = self.transformer(x)
+        # Decoding
+        for layer in self.decoder:
+            x = self.activation(layer(x))
 
-        for l in range(0, self.num_layers - 1):
-            lin = getattr(self, "lin" + str(l))
-
-            if l in self.skip_in:
-                x = torch.cat([x, inputs], 1) / np.sqrt(2)
-
-            x = lin(x)
-
-            if l < self.num_layers - 2:
-                x = self.activation(x)
         return torch.cat([x[:, :1] / self.scale, x[:, 1:]], dim=-1)
 
     def sdf(self, x):
@@ -143,13 +160,7 @@ class SDFNetwork(nn.Module):
             create_graph=True,
             retain_graph=True,
             only_inputs=True)[0]
-
-        gradients = gradients.unsqueeze(1)
-        # print(f'gradients shape pre: {gradients.shape}')
-        gradients = gradients.reshape(-1, 3)
-        # print(f'gradients shape post: {gradients.shape}')
-        return gradients
-        # return gradients.unsqueeze(1)
+        return gradients.unsqueeze(1)
 
 
 # This implementation is borrowed from IDR: https://github.com/lioryariv/idr
@@ -196,14 +207,6 @@ class RenderingNetwork(nn.Module):
         rendering_input = None
 
         if self.mode == 'idr':
-
-            normals = normals.reshape(-1, 3)
-
-            # print shapes
-            # print(f'points shape idr: {points.shape}')
-            # print(f'view_dirs shape idr: {view_dirs.shape}')
-            # print(f'normals shape idr: {normals.shape}')
-            # print(f'feature_vectors shape idr: {feature_vectors.shape}')
             rendering_input = torch.cat([points, view_dirs, normals, feature_vectors], dim=-1)
         elif self.mode == 'no_view_dir':
             rendering_input = torch.cat([points, normals, feature_vectors], dim=-1)
@@ -247,8 +250,6 @@ class NeRF(nn.Module):
         self.embed_fn = None
         self.embed_fn_view = None
 
-
-
         if multires > 0:
             embed_fn, input_ch = get_embedder(multires, input_dims=d_in)
             self.embed_fn = embed_fn
@@ -282,19 +283,10 @@ class NeRF(nn.Module):
             self.output_linear = nn.Linear(W, output_ch)
 
     def forward(self, input_pts, input_views):
-
-        # print(f'input_pts shape {input_pts.shape}')
-        # print(f'input_views shape {input_views.shape}')
-        # print(f'input_pts type {type(input_pts)}')
-        # print(f'input_views type {type(input_views)}')
-
         if self.embed_fn is not None:
             input_pts = self.embed_fn(input_pts)
         if self.embed_fn_view is not None:
             input_views = self.embed_fn_view(input_views)
-
-        ### apply trasnformer to input_pts
-        # input_pts = self.transformer(input_pts)
 
         h = input_pts
         for i, l in enumerate(self.pts_linears):

@@ -11,8 +11,8 @@ step_size: 20
 num_class: 0
 input_dim: 3
 
-nneighbor: 16
-nblocks: 2
+nneighbor: 8
+nblocks: 1
 #transformer_dim: 512
 transformer_dim: 128
 

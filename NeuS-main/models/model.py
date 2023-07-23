@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from models.pointnet_util import PointNetFeaturePropagation, PointNetSetAbstraction
 from .transformer import TransformerBlock
+import numpy as np
 
 
 class TransitionDown(nn.Module):
@@ -85,11 +86,11 @@ class PointTransformerSeg(nn.Module):
         npoints, nblocks, nneighbor, n_c, d_points = cfg['num_point'], cfg['nblocks'], cfg[
             'nneighbor'], cfg['num_class'], cfg['input_dim']
         self.fc2 = nn.Sequential(
-            nn.Linear(32 * 2 ** nblocks, 128),
+            nn.Linear(32 * 2 ** nblocks, 256),
+            # nn.ReLU(),
+            # nn.Linear(128, 128),
             nn.ReLU(),
-            nn.Linear(128, 128),
-            nn.ReLU(),
-            nn.Linear(128, 32 * 2 ** nblocks)
+            nn.Linear(256, 32 * 2 ** nblocks)
         )
         self.transformer2 = TransformerBlock(32 * 2 ** nblocks, cfg['transformer_dim'], nneighbor)
         self.nblocks = nblocks
@@ -104,6 +105,34 @@ class PointTransformerSeg(nn.Module):
 
         self.final_layer = nn.Linear(32, 3)
 
+    ### forward with patches
+    # def forward(self, x):
+    #     # Extract patches from the point cloud
+    #     # patches = self.extract_patches(x)
+    #     #
+    #     # print('Input shape: ', x.shape)
+    #
+    #     # Process each patch independently
+    #     patch_outputs = []
+    #     for patch in patches:
+    #         points, xyz_and_feats = self.backbone(patch)
+    #         xyz = xyz_and_feats[-1][0]
+    #         points = self.transformer2(xyz, self.fc2(points))[0]
+    #
+    #         for i in range(self.nblocks):
+    #             points = self.transition_ups[i](xyz, points, xyz_and_feats[- i - 2][0], xyz_and_feats[- i - 2][1])
+    #             xyz = xyz_and_feats[- i - 2][0]
+    #             points = self.transformers[i](xyz, points)[0]
+    #
+    #         patch_outputs.append(self.final_layer(points))
+    #
+    #     # Assemble the patch outputs back into a complete point cloud
+    #     output = self.assemble_patches(patch_outputs)
+    #
+    #     print("Output shape: ", output.shape)
+    #
+    #     return output
+
     def forward(self, x):
         points, xyz_and_feats = self.backbone(x)
         xyz = xyz_and_feats[-1][0]
@@ -115,5 +144,23 @@ class PointTransformerSeg(nn.Module):
             points = self.transformers[i](xyz, points)[0]
 
         return self.final_layer(points)
-        # return points
+
+    def extract_patches(self, x, patch_size=50):
+        num_points = x.shape[0]
+        patches = []
+
+        # Slide a window over the point cloud
+        for i in range(0, num_points, patch_size):
+            # If the remaining points are less than patch_size, take all remaining points
+            end = min(i + patch_size, num_points)
+            patch = x[i:end]
+            patches.append(patch)
+
+        print("Number of patches: ", len(patches))
+
+        return patches
+
+    def assemble_patches(self, patch_outputs):
+        # Simply concatenate the patch outputs along the point dimension
+        return torch.cat(patch_outputs, dim=0)
     
