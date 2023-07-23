@@ -87,6 +87,26 @@ import math
 #                 x = self.activation(x)
 #         return torch.cat([x[:, :1] / self.scale, x[:, 1:]], dim=-1)
 
+
+class SelfAttention(nn.Module):
+    def __init__(self, input_dim):
+        super(SelfAttention, self).__init__()
+        self.input_dim = input_dim
+        self.query = nn.Linear(input_dim, input_dim)
+        self.key = nn.Linear(input_dim, input_dim)
+        self.value = nn.Linear(input_dim, input_dim)
+        self.softmax = nn.Softmax(dim=2)
+
+    def forward(self, x):
+        queries = self.query(x)
+        keys = self.key(x)
+        values = self.value(x)
+        scores = torch.bmm(queries, keys.transpose(1, 2)) / (self.input_dim ** 0.5)
+        attention = self.softmax(scores)
+        weighted = torch.bmm(attention, values)
+        return weighted
+
+
 class SDFNetwork(nn.Module):
     def __init__(self, d_in, d_out, d_hidden, n_layers, skip_in=(4,), multires=0, bias=0.5, scale=1,
                  geometric_init=True, weight_norm=True, inside_outside=False):
@@ -96,7 +116,7 @@ class SDFNetwork(nn.Module):
         self.skip_in = skip_in
         self.scale = scale
         self.d_k = d_hidden
-        self.latent_dim = 16
+        self.latent_dim = 512
 
         # Encoder layers
         self.encoder = nn.ModuleList()
@@ -124,6 +144,9 @@ class SDFNetwork(nn.Module):
 
         self.activation = nn.Softplus(beta=100)
 
+        self.attention = SelfAttention(self.latent_dim)
+
+
     def forward(self, inputs):
         # Encoding
         x = inputs
@@ -133,21 +156,14 @@ class SDFNetwork(nn.Module):
         # Reshape x for attention
         x = x.view(x.size(0), -1, self.latent_dim)
 
-        # Self-attention
-        q = self.attention(x)  # Query
-        k = self.attention(x)  # Key
-        v = x  # Value
-        attn_weights = F.softmax((q @ k.transpose(-1, -2)) / math.sqrt(self.latent_dim), dim=-1)
-        x = (attn_weights @ v).sum(dim=1)
-
-        x = x.view(x.size(0), -1)  # Reshape x for decoder
+        x = self.attention(x)
+        x = x.view(x.size(0), -1)
 
         # Decoding
         for layer in self.decoder:
             x = self.activation(layer(x))
 
         return torch.cat([x[:, :1] / self.scale, x[:, 1:]], dim=-1)
-
 
 
     def sdf(self, x):
