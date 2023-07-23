@@ -96,7 +96,7 @@ class SDFNetwork(nn.Module):
         self.skip_in = skip_in
         self.scale = scale
         self.d_k = d_hidden
-        self.latent_dim = 64
+        self.latent_dim = 16
 
         # Encoder layers
         self.encoder = nn.ModuleList()
@@ -130,18 +130,25 @@ class SDFNetwork(nn.Module):
         for layer in self.encoder:
             x = self.activation(layer(x))
 
+        # Reshape x for attention
+        x = x.view(x.size(0), -1, self.latent_dim)
+
         # Self-attention
         q = self.attention(x)  # Query
         k = self.attention(x)  # Key
         v = x  # Value
-        attn_weights = F.softmax(q @ k.transpose(-2, -1) / math.sqrt(self.latent_dim), dim=-1)
-        x = attn_weights @ v
+        attn_weights = F.softmax((q @ k.transpose(-1, -2)) / math.sqrt(self.latent_dim), dim=-1)
+        x = (attn_weights @ v).sum(dim=1)
+
+        x = x.view(x.size(0), -1)  # Reshape x for decoder
 
         # Decoding
         for layer in self.decoder:
             x = self.activation(layer(x))
 
         return torch.cat([x[:, :1] / self.scale, x[:, 1:]], dim=-1)
+
+
 
     def sdf(self, x):
         return self.forward(x)[:, :1]
