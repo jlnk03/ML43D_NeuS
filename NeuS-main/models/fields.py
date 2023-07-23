@@ -32,6 +32,9 @@ class SDFNetwork(nn.Module):
                  inside_outside=False):
         super(SDFNetwork, self).__init__()
 
+        print("sdf d_in: ", d_in)
+        print("sdf d_out: ", d_out)
+
         dims = [d_in] + [d_hidden for _ in range(n_layers)] + [d_out]
 
         self.embed_fn_fine = None
@@ -44,6 +47,16 @@ class SDFNetwork(nn.Module):
         self.num_layers = len(dims)
         self.skip_in = skip_in
         self.scale = scale
+
+        # Get the path to the configuration file
+        conf_path = os.path.join(os.path.dirname(__file__), 'confs', 'partseg.yaml')
+
+        # Load the configuration file
+        with open(conf_path, 'r') as f:
+            conf = yaml.safe_load(f)
+
+        # Initialize the transformer using the hydra configuration
+        self.transformer = PointTransformerSeg(conf)
 
         for l in range(0, self.num_layers - 1):
             if l + 1 in self.skip_in:
@@ -81,11 +94,26 @@ class SDFNetwork(nn.Module):
         self.activation = nn.Softplus(beta=100)
 
     def forward(self, inputs):
+
+        print(f'sdf input shape pre: {inputs.shape}')
+
+        inputs = self.transformer(inputs)
+
         inputs = inputs * self.scale
+
+        print(f'sdf input shape post: {inputs.shape}')
+
+        inputs = inputs.reshape(-1, 3)
+
         if self.embed_fn_fine is not None:
             inputs = self.embed_fn_fine(inputs)
 
         x = inputs
+
+        print(f'sdf input shape: {x.shape}')
+
+        # x = self.transformer(x)
+
         for l in range(0, self.num_layers - 1):
             lin = getattr(self, "lin" + str(l))
 
@@ -205,17 +233,7 @@ class NeRF(nn.Module):
         self.embed_fn = None
         self.embed_fn_view = None
 
-        print(f'input dimension {d_in}')
 
-        # Get the path to the configuration file
-        conf_path = os.path.join(os.path.dirname(__file__), 'confs', 'partseg.yaml')
-
-        # Load the configuration file
-        with open(conf_path, 'r') as f:
-            conf = yaml.safe_load(f)
-
-        # Initialize the transformer using the hydra configuration
-        self.transformer = PointTransformerSeg(conf)
 
         if multires > 0:
             embed_fn, input_ch = get_embedder(multires, input_dims=d_in)
@@ -251,10 +269,10 @@ class NeRF(nn.Module):
 
     def forward(self, input_pts, input_views):
 
-        print(f'input_pts shape {input_pts.shape}')
-        print(f'input_views shape {input_views.shape}')
-        print(f'input_pts type {type(input_pts)}')
-        print(f'input_views type {type(input_views)}')
+        # print(f'input_pts shape {input_pts.shape}')
+        # print(f'input_views shape {input_views.shape}')
+        # print(f'input_pts type {type(input_pts)}')
+        # print(f'input_views type {type(input_views)}')
 
         if self.embed_fn is not None:
             input_pts = self.embed_fn(input_pts)
@@ -262,7 +280,7 @@ class NeRF(nn.Module):
             input_views = self.embed_fn_view(input_views)
 
         ### apply trasnformer to input_pts
-        input_pts = self.transformer(input_pts)
+        # input_pts = self.transformer(input_pts)
 
         h = input_pts
         for i, l in enumerate(self.pts_linears):

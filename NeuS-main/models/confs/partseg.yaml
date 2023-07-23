@@ -8,6 +8,12 @@ weight_decay: 1e-4
 normal: True
 lr_decay: 0.5
 step_size: 20
+num_class: 0
+input_dim: 3
+
+nneighbor: 16
+nblocks: 4
+transformer_dim: 512
 
 defaults:
   - model: Hengshuang

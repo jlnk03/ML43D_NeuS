@@ -214,7 +214,10 @@ class NeuSRenderer:
         pts = rays_o[:, None, :] + rays_d[:, None, :] * mid_z_vals[..., :, None]  # n_rays, n_samples, 3
         dirs = rays_d[:, None, :].expand(pts.shape)
 
-        pts = pts.reshape(-1, 3)
+        print(f'pts.shape: {pts.shape}')
+
+        # point transformer first and reshape after
+        # pts = pts.reshape(-1, 3)
         dirs = dirs.reshape(-1, 3)
 
         sdf_nn_output = sdf_network(pts)
@@ -319,7 +322,10 @@ class NeuSRenderer:
         if self.n_importance > 0:
             with torch.no_grad():
                 pts = rays_o[:, None, :] + rays_d[:, None, :] * z_vals[..., :, None]
-                sdf = self.sdf_network.sdf(pts.reshape(-1, 3)).reshape(batch_size, self.n_samples)
+                # sdf = self.sdf_network.sdf(pts.reshape(-1, 3)).reshape(batch_size, self.n_samples)
+
+                print("pts.shape 327", pts.shape)
+                sdf = self.sdf_network.sdf(pts).reshape(batch_size, self.n_samples)
 
                 for i in range(self.up_sample_steps):
                     new_z_vals = self.up_sample(rays_o,
