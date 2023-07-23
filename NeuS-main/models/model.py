@@ -118,8 +118,12 @@ class PointTransformerSeg(nn.Module):
         self.transformers = nn.ModuleList()
         for i in reversed(range(nblocks)):
             channel = 32 * 2 ** i
-            self.transition_ups.append(TransitionUp(channel * 2, channel, channel))
+            # self.transition_ups.append(TransitionUp(channel * 2, channel, channel))
+            # output dimension 3
+            self.transition_ups.append(TransitionUp(channel * 2, channel, 3))
             self.transformers.append(TransformerBlock(channel, cfg['transformer_dim'], nneighbor))
+
+        # self.final_layer = nn.Linear(32, 3)
 
     def forward(self, x):
         points, xyz_and_feats = self.backbone(x)
@@ -131,6 +135,6 @@ class PointTransformerSeg(nn.Module):
             xyz = xyz_and_feats[- i - 2][0]
             points = self.transformers[i](xyz, points)[0]
 
+        # return self.final_layer(points)
         return points
-
     
