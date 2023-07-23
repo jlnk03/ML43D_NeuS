@@ -6,6 +6,14 @@ from models.embedder import get_embedder
 from models.model import PointTransformerSeg
 import os
 import yaml
+# from omegaconf import DictConfig
+# import hydra
+
+
+# @hydra.main(config_path=os.path.join(os.path.dirname(__file__), 'confs'), config_name='partseg')
+# def init_transformer(cfg : DictConfig) -> None:
+#     transformer = PointTransformerSeg(cfg)
+#     return transformer
 
 
 # This implementation is borrowed from IDR: https://github.com/lioryariv/idr
@@ -197,6 +205,8 @@ class NeRF(nn.Module):
         self.embed_fn = None
         self.embed_fn_view = None
 
+        print(f'input dimension {d_in}')
+
         # Get the path to the configuration file
         conf_path = os.path.join(os.path.dirname(__file__), 'confs', 'partseg.yaml')
 
@@ -204,8 +214,8 @@ class NeRF(nn.Module):
         with open(conf_path, 'r') as f:
             conf = yaml.safe_load(f)
 
-        # Use the configuration to initialize the transformer
-        self.transformer = PointTransformerSeg(**conf)
+        # Initialize the transformer using the hydra configuration
+        self.transformer = PointTransformerSeg(conf)
 
         if multires > 0:
             embed_fn, input_ch = get_embedder(multires, input_dims=d_in)
@@ -240,6 +250,12 @@ class NeRF(nn.Module):
             self.output_linear = nn.Linear(W, output_ch)
 
     def forward(self, input_pts, input_views):
+
+        print(f'input_pts shape {input_pts.shape}')
+        print(f'input_views shape {input_views.shape}')
+        print(f'input_pts type {type(input_pts)}')
+        print(f'input_views type {type(input_views)}')
+
         if self.embed_fn is not None:
             input_pts = self.embed_fn(input_pts)
         if self.embed_fn_view is not None:
