@@ -146,7 +146,7 @@ class Runner:
             color_fine_loss = F.l1_loss(color_error, torch.zeros_like(color_error), reduction='sum') / mask_sum
             psnr = 20.0 * torch.log10(1.0 / (((color_fine - true_rgb)**2 * mask).sum() / (mask_sum * 3.0)).sqrt())
 
-            color_fine_loss_weight = 0.75  # You can adjust this weight to control the tolerance to color loss
+            color_fine_loss_weight = 0.9  # You can adjust this weight to control the tolerance to color loss
             regularized_color_fine_loss = color_fine_loss * color_fine_loss_weight
 
             eikonal_loss = gradient_error
