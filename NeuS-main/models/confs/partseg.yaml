@@ -12,9 +12,9 @@ num_class: 0
 input_dim: 3
 
 nneighbor: 16
-nblocks: 4
+nblocks: 2
 #transformer_dim: 512
-transformer_dim: 256
+transformer_dim: 128
 
 defaults:
   - model: Hengshuang

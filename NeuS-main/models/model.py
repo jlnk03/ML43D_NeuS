@@ -78,27 +78,6 @@ class Backbone(nn.Module):
         return points, xyz_and_feats
 
 
-class PointTransformerCls(nn.Module):
-    def __init__(self, cfg):
-        super().__init__()
-        self.backbone = Backbone(cfg)
-        npoints, nblocks, nneighbor, n_c, d_points = cfg['num_point'], cfg['nblocks'], cfg[
-            'nneighbor'], cfg['num_class'], cfg['input_dim']
-        self.fc2 = nn.Sequential(
-            nn.Linear(32 * 2 ** nblocks, 256),
-            nn.ReLU(),
-            nn.Linear(256, 64),
-            nn.ReLU(),
-            nn.Linear(64, n_c)
-        )
-        self.nblocks = nblocks
-
-    def forward(self, x):
-        points, _ = self.backbone(x)
-        res = self.fc2(points.mean(1))
-        return res
-
-
 class PointTransformerSeg(nn.Module):
     def __init__(self, cfg):
         super().__init__()
@@ -106,11 +85,11 @@ class PointTransformerSeg(nn.Module):
         npoints, nblocks, nneighbor, n_c, d_points = cfg['num_point'], cfg['nblocks'], cfg[
             'nneighbor'], cfg['num_class'], cfg['input_dim']
         self.fc2 = nn.Sequential(
-            nn.Linear(32 * 2 ** nblocks, 512),
+            nn.Linear(32 * 2 ** nblocks, 128),
             nn.ReLU(),
-            nn.Linear(512, 512),
+            nn.Linear(128, 128),
             nn.ReLU(),
-            nn.Linear(512, 32 * 2 ** nblocks)
+            nn.Linear(128, 32 * 2 ** nblocks)
         )
         self.transformer2 = TransformerBlock(32 * 2 ** nblocks, cfg['transformer_dim'], nneighbor)
         self.nblocks = nblocks

@@ -95,13 +95,13 @@ class SDFNetwork(nn.Module):
 
     def forward(self, inputs):
 
-        print(f'sdf input shape pre: {inputs.shape}')
+        # print(f'sdf input shape pre: {inputs.shape}')
 
         inputs = self.transformer(inputs)
 
         inputs = inputs * self.scale
 
-        print(f'sdf input shape post: {inputs.shape}')
+        # print(f'sdf input shape post: {inputs.shape}')
 
         inputs = inputs.reshape(-1, 3)
 
@@ -110,7 +110,7 @@ class SDFNetwork(nn.Module):
 
         x = inputs
 
-        print(f'sdf input shape: {x.shape}')
+        # print(f'sdf input shape: {x.shape}')
 
         # x = self.transformer(x)
 
@@ -145,9 +145,9 @@ class SDFNetwork(nn.Module):
             only_inputs=True)[0]
 
         gradients = gradients.unsqueeze(1)
-        print(f'gradients shape pre: {gradients.shape}')
+        # print(f'gradients shape pre: {gradients.shape}')
         gradients = gradients.reshape(-1, 3)
-        print(f'gradients shape post: {gradients.shape}')
+        # print(f'gradients shape post: {gradients.shape}')
         return gradients
         # return gradients.unsqueeze(1)
 
@@ -200,10 +200,10 @@ class RenderingNetwork(nn.Module):
             normals = normals.reshape(-1, 3)
 
             # print shapes
-            print(f'points shape idr: {points.shape}')
-            print(f'view_dirs shape idr: {view_dirs.shape}')
-            print(f'normals shape idr: {normals.shape}')
-            print(f'feature_vectors shape idr: {feature_vectors.shape}')
+            # print(f'points shape idr: {points.shape}')
+            # print(f'view_dirs shape idr: {view_dirs.shape}')
+            # print(f'normals shape idr: {normals.shape}')
+            # print(f'feature_vectors shape idr: {feature_vectors.shape}')
             rendering_input = torch.cat([points, view_dirs, normals, feature_vectors], dim=-1)
         elif self.mode == 'no_view_dir':
             rendering_input = torch.cat([points, normals, feature_vectors], dim=-1)
