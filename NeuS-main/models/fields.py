@@ -143,7 +143,13 @@ class SDFNetwork(nn.Module):
             create_graph=True,
             retain_graph=True,
             only_inputs=True)[0]
-        return gradients.unsqueeze(1)
+
+        gradients = gradients.unsqueeze(1)
+        print(f'gradients shape pre: {gradients.shape}')
+        gradients = gradients.reshape(-1, 3)
+        print(f'gradients shape post: {gradients.shape}')
+        return gradients
+        # return gradients.unsqueeze(1)
 
 
 # This implementation is borrowed from IDR: https://github.com/lioryariv/idr
@@ -190,6 +196,14 @@ class RenderingNetwork(nn.Module):
         rendering_input = None
 
         if self.mode == 'idr':
+
+            normals = normals.reshape(-1, 3)
+
+            # print shapes
+            print(f'points shape idr: {points.shape}')
+            print(f'view_dirs shape idr: {view_dirs.shape}')
+            print(f'normals shape idr: {normals.shape}')
+            print(f'feature_vectors shape idr: {feature_vectors.shape}')
             rendering_input = torch.cat([points, view_dirs, normals, feature_vectors], dim=-1)
         elif self.mode == 'no_view_dir':
             rendering_input = torch.cat([points, normals, feature_vectors], dim=-1)

@@ -15,6 +15,8 @@ from pyhocon import ConfigFactory
 from models.dataset import Dataset
 from models.fields import RenderingNetwork, SDFNetwork, SingleVarianceNetwork, NeRF
 from models.renderer import NeuSRenderer
+# for memory efficiency
+from torch.cuda.amp import autocast, GradScaler
 
 
 class Runner:
@@ -96,10 +98,17 @@ class Runner:
             self.file_backup()
 
     def train(self):
+        """
+        Train the model
+        using amp for memory efficiency
+        :return:  None
+        """
         self.writer = SummaryWriter(log_dir=os.path.join(self.base_exp_dir, 'logs'))
         self.update_learning_rate()
         res_step = self.end_iter - self.iter_step
         image_perm = self.get_image_perm()
+
+        scaler = GradScaler()  # Initializes GradScaler
 
         for iter_i in tqdm(range(res_step)):
             data = self.dataset.gen_random_rays_at(image_perm[self.iter_step % len(image_perm)], self.batch_size)
@@ -117,33 +126,43 @@ class Runner:
                 mask = torch.ones_like(mask)
 
             mask_sum = mask.sum() + 1e-5
-            render_out = self.renderer.render(rays_o, rays_d, near, far,
-                                              background_rgb=background_rgb,
-                                              cos_anneal_ratio=self.get_cos_anneal_ratio())
 
-            color_fine = render_out['color_fine']
-            s_val = render_out['s_val']
-            cdf_fine = render_out['cdf_fine']
-            gradient_error = render_out['gradient_error']
-            weight_max = render_out['weight_max']
-            weight_sum = render_out['weight_sum']
+            # Encloses model forward pass with autocast for automatic mixed precision
+            with autocast():
+                render_out = self.renderer.render(rays_o, rays_d, near, far,
+                                                  background_rgb=background_rgb,
+                                                  cos_anneal_ratio=self.get_cos_anneal_ratio())
 
-            # Loss
-            color_error = (color_fine - true_rgb) * mask
-            color_fine_loss = F.l1_loss(color_error, torch.zeros_like(color_error), reduction='sum') / mask_sum
-            psnr = 20.0 * torch.log10(1.0 / (((color_fine - true_rgb)**2 * mask).sum() / (mask_sum * 3.0)).sqrt())
+                color_fine = render_out['color_fine']
+                s_val = render_out['s_val']
+                cdf_fine = render_out['cdf_fine']
+                gradient_error = render_out['gradient_error']
+                weight_max = render_out['weight_max']
+                weight_sum = render_out['weight_sum']
 
-            eikonal_loss = gradient_error
+                # Loss
+                color_error = (color_fine - true_rgb) * mask
+                color_fine_loss = F.l1_loss(color_error, torch.zeros_like(color_error), reduction='sum') / mask_sum
+                psnr = 20.0 * torch.log10(1.0 / (((color_fine - true_rgb) ** 2 * mask).sum() / (mask_sum * 3.0)).sqrt())
 
-            mask_loss = F.binary_cross_entropy(weight_sum.clip(1e-3, 1.0 - 1e-3), mask)
+                eikonal_loss = gradient_error
 
-            loss = color_fine_loss +\
-                   eikonal_loss * self.igr_weight +\
-                   mask_loss * self.mask_weight
+                mask_loss = F.binary_cross_entropy(weight_sum.clip(1e-3, 1.0 - 1e-3), mask)
+
+                loss = color_fine_loss + \
+                       eikonal_loss * self.igr_weight + \
+                       mask_loss * self.mask_weight
 
             self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
+
+            # Scales the loss, and calls backward() on the scaled loss to create scaled gradients
+            scaler.scale(loss).backward()
+
+            # Unscales gradients and calls optimizer.step()
+            scaler.step(self.optimizer)
+
+            # Updates the scale for next iteration
+            scaler.update()
 
             self.iter_step += 1
 
