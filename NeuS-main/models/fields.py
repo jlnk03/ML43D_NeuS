@@ -5,7 +5,176 @@ import numpy as np
 from models.embedder import get_embedder
 import math
 
+
+class SelfAttention(nn.Module):
+    def __init__(self, input_dim):
+        super(SelfAttention, self).__init__()
+        self.input_dim = input_dim
+        self.query = nn.Linear(input_dim, input_dim)
+        self.key = nn.Linear(input_dim, input_dim)
+        self.value = nn.Linear(input_dim, input_dim)
+        self.softmax = nn.Softmax(dim=2)
+
+    def forward(self, x):
+        queries = self.query(x)
+        keys = self.key(x)
+        values = self.value(x)
+        scores = torch.bmm(queries, keys.transpose(1, 2)) / (self.input_dim ** 0.5)
+        attention = self.softmax(scores)
+        weighted = torch.bmm(attention, values)
+        return weighted
+
 # This implementation is borrowed from IDR: https://github.com/lioryariv/idr
+class SDFNetwork(nn.Module):
+    def __init__(self,
+                 d_in,
+                 d_out,
+                 d_hidden,
+                 n_layers,
+                 skip_in=(4,),
+                 multires=0,
+                 bias=0.5,
+                 scale=1,
+                 geometric_init=True,
+                 weight_norm=True,
+                 inside_outside=False):
+        super(SDFNetwork, self).__init__()
+
+        dims = [d_in] + [d_hidden for _ in range(n_layers)] + [d_out]
+
+        self.embed_fn_fine = None
+
+        if multires > 0:
+            embed_fn, input_ch = get_embedder(multires, input_dims=d_in)
+            self.embed_fn_fine = embed_fn
+            dims[0] = input_ch
+
+        self.num_layers = len(dims)
+        self.skip_in = skip_in
+        self.scale = scale
+
+        for l in range(0, self.num_layers - 1):
+            if l + 1 in self.skip_in:
+                out_dim = dims[l + 1] - dims[0]
+            else:
+                out_dim = dims[l + 1]
+
+            lin = nn.Linear(dims[l], out_dim)
+
+            if geometric_init:
+                if l == self.num_layers - 2:
+                    if not inside_outside:
+                        torch.nn.init.normal_(lin.weight, mean=np.sqrt(np.pi) / np.sqrt(dims[l]), std=0.0001)
+                        torch.nn.init.constant_(lin.bias, -bias)
+                    else:
+                        torch.nn.init.normal_(lin.weight, mean=-np.sqrt(np.pi) / np.sqrt(dims[l]), std=0.0001)
+                        torch.nn.init.constant_(lin.bias, bias)
+                elif multires > 0 and l == 0:
+                    torch.nn.init.constant_(lin.bias, 0.0)
+                    torch.nn.init.constant_(lin.weight[:, 3:], 0.0)
+                    torch.nn.init.normal_(lin.weight[:, :3], 0.0, np.sqrt(2) / np.sqrt(out_dim))
+                elif multires > 0 and l in self.skip_in:
+                    torch.nn.init.constant_(lin.bias, 0.0)
+                    torch.nn.init.normal_(lin.weight, 0.0, np.sqrt(2) / np.sqrt(out_dim))
+                    torch.nn.init.constant_(lin.weight[:, -(dims[0] - 3):], 0.0)
+                else:
+                    torch.nn.init.constant_(lin.bias, 0.0)
+                    torch.nn.init.normal_(lin.weight, 0.0, np.sqrt(2) / np.sqrt(out_dim))
+
+            if weight_norm:
+                lin = nn.utils.weight_norm(lin)
+
+            setattr(self, "lin" + str(l), lin)
+
+        self.activation = nn.Softplus(beta=100)
+
+        self.attention = SelfAttention(dims[-1])
+
+    def forward(self, inputs):
+        inputs = inputs * self.scale
+        if self.embed_fn_fine is not None:
+            inputs = self.embed_fn_fine(inputs)
+
+        x = inputs
+        for l in range(0, self.num_layers - 1):
+            lin = getattr(self, "lin" + str(l))
+
+            if l in self.skip_in:
+                x = torch.cat([x, inputs], 1) / np.sqrt(2)
+
+            x = lin(x)
+
+            if l < self.num_layers - 2:
+                x = self.activation(x)
+
+        # print(f'inputs.shape: {inputs.shape}')
+        # print(f'x.shape: {x.shape}')
+        # reshape
+        x = x.unsqueeze(1)
+        # print(f'x.shape unsq: {x.shape}')
+        x = self.attention(x)
+        x = x.squeeze(1)
+
+        return torch.cat([x[:, :1] / self.scale, x[:, 1:]], dim=-1)
+
+# class SDFNetwork(nn.Module):
+#     def __init__(self, d_in, d_out, d_hidden, n_layers, skip_in=(4,), multires=0, bias=0.5, scale=1,
+#                  geometric_init=True, weight_norm=True, inside_outside=False):
+#         super(SDFNetwork, self).__init__()
+#
+#         self.num_layers = n_layers
+#         self.skip_in = skip_in
+#         self.scale = scale
+#         self.d_k = d_hidden
+#         self.latent_dim = 512
+#
+#         # Encoder layers
+#         self.encoder = nn.ModuleList()
+#         for i in range(n_layers):
+#             if i == 0:
+#                 self.encoder.append(nn.Linear(d_in, d_hidden))
+#             else:
+#                 self.encoder.append(nn.Linear(d_hidden, d_hidden))
+#
+#         self.encoder.append(nn.Linear(d_hidden, self.latent_dim))
+#
+#         # Decoder layers
+#         self.decoder = nn.ModuleList()
+#
+#         self.decoder.append(nn.Linear(self.latent_dim, d_hidden))
+#
+#         for i in range(n_layers):
+#             if i == n_layers - 1:
+#                 self.decoder.append(nn.Linear(d_hidden, d_out))
+#             else:
+#                 self.decoder.append(nn.Linear(d_hidden, d_hidden))
+#
+#         # Attention mechanism
+#         self.attention = nn.Linear(self.latent_dim, self.latent_dim)
+#
+#         self.activation = nn.Softplus(beta=100)
+#
+#         self.attention = SelfAttention(self.latent_dim)
+#
+#     def forward(self, inputs):
+#         # Encoding
+#         x = inputs
+#         for layer in self.encoder:
+#             x = self.activation(layer(x))
+#
+#         # Reshape x for attention
+#         # x = x.view(x.size(0), -1, self.latent_dim)
+#         #
+#         # x = self.attention(x)
+#         # x = x.view(x.size(0), -1)
+#
+#         # Decoding
+#         for layer in self.decoder:
+#             x = self.activation(layer(x))
+#
+#         return torch.cat([x[:, :1] / self.scale, x[:, 1:]], dim=-1)
+
+    # This implementation is borrowed from IDR: https://github.com/lioryariv/idr
 # class SDFNetwork(nn.Module):
 #     def __init__(self,
 #                  d_in,
@@ -69,7 +238,11 @@ import math
 #
 #         self.activation = nn.Softplus(beta=100)
 #
+#         print(f'out dim: {d_hidden}')
+#         self.attention = SelfAttention(d_hidden)
+#
 #     def forward(self, inputs):
+#         print(f'inputs shape: {inputs.shape}')
 #         inputs = inputs * self.scale
 #         if self.embed_fn_fine is not None:
 #             inputs = self.embed_fn_fine(inputs)
@@ -85,85 +258,16 @@ import math
 #
 #             if l < self.num_layers - 2:
 #                 x = self.activation(x)
+#
+#             # attention
+#             # Reshape x for attention
+#             # x = x.view(x.size(0), -1, 256)
+#             x = x.unsqueeze(1)  # shape becomes (batch, 1, feature)
+#             print(f'x shape: {x.shape}')
+#             x = self.attention(x)
+#             x = x.view(x.size(0), -1)
+#
 #         return torch.cat([x[:, :1] / self.scale, x[:, 1:]], dim=-1)
-
-
-class SelfAttention(nn.Module):
-    def __init__(self, input_dim):
-        super(SelfAttention, self).__init__()
-        self.input_dim = input_dim
-        self.query = nn.Linear(input_dim, input_dim)
-        self.key = nn.Linear(input_dim, input_dim)
-        self.value = nn.Linear(input_dim, input_dim)
-        self.softmax = nn.Softmax(dim=2)
-
-    def forward(self, x):
-        queries = self.query(x)
-        keys = self.key(x)
-        values = self.value(x)
-        scores = torch.bmm(queries, keys.transpose(1, 2)) / (self.input_dim ** 0.5)
-        attention = self.softmax(scores)
-        weighted = torch.bmm(attention, values)
-        return weighted
-
-
-class SDFNetwork(nn.Module):
-    def __init__(self, d_in, d_out, d_hidden, n_layers, skip_in=(4,), multires=0, bias=0.5, scale=1,
-                 geometric_init=True, weight_norm=True, inside_outside=False):
-        super(SDFNetwork, self).__init__()
-
-        self.num_layers = n_layers
-        self.skip_in = skip_in
-        self.scale = scale
-        self.d_k = d_hidden
-        self.latent_dim = 512
-
-        # Encoder layers
-        self.encoder = nn.ModuleList()
-        for i in range(n_layers):
-            if i == 0:
-                self.encoder.append(nn.Linear(d_in, d_hidden))
-            else:
-                self.encoder.append(nn.Linear(d_hidden, d_hidden))
-
-        self.encoder.append(nn.Linear(d_hidden, self.latent_dim))
-
-        # Decoder layers
-        self.decoder = nn.ModuleList()
-
-        self.decoder.append(nn.Linear(self.latent_dim, d_hidden))
-
-        for i in range(n_layers):
-            if i == n_layers - 1:
-                self.decoder.append(nn.Linear(d_hidden, d_out))
-            else:
-                self.decoder.append(nn.Linear(d_hidden, d_hidden))
-
-        # Attention mechanism
-        self.attention = nn.Linear(self.latent_dim, self.latent_dim)
-
-        self.activation = nn.Softplus(beta=100)
-
-        self.attention = SelfAttention(self.latent_dim)
-
-
-    def forward(self, inputs):
-        # Encoding
-        x = inputs
-        for layer in self.encoder:
-            x = self.activation(layer(x))
-
-        # Reshape x for attention
-        x = x.view(x.size(0), -1, self.latent_dim)
-
-        x = self.attention(x)
-        x = x.view(x.size(0), -1)
-
-        # Decoding
-        for layer in self.decoder:
-            x = self.activation(layer(x))
-
-        return torch.cat([x[:, :1] / self.scale, x[:, 1:]], dim=-1)
 
 
     def sdf(self, x):
