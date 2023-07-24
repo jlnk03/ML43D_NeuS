@@ -88,9 +88,14 @@ class SDFNetwork(nn.Module):
 
         self.activation = nn.Softplus(beta=100)
 
-        self.attention = SelfAttention(dims[-1])
+        self.attention = SelfAttention(dims[0])
 
     def forward(self, inputs):
+
+        inputs = inputs.unsqueeze(1)
+        inputs = self.attention(inputs)
+        inputs = inputs.squeeze(1)
+
         inputs = inputs * self.scale
         if self.embed_fn_fine is not None:
             inputs = self.embed_fn_fine(inputs)
@@ -110,10 +115,10 @@ class SDFNetwork(nn.Module):
         # print(f'inputs.shape: {inputs.shape}')
         # print(f'x.shape: {x.shape}')
         # reshape
-        x = x.unsqueeze(1)
+        # x = x.unsqueeze(1)
         # print(f'x.shape unsq: {x.shape}')
-        x = self.attention(x)
-        x = x.squeeze(1)
+        # x = self.attention(x)
+        # x = x.squeeze(1)
 
         return torch.cat([x[:, :1] / self.scale, x[:, 1:]], dim=-1)
 
