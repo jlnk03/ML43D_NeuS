@@ -92,13 +92,14 @@ class SDFNetwork(nn.Module):
 
     def forward(self, inputs):
 
-        inputs = inputs.unsqueeze(1)
-        inputs = self.attention(inputs)
-        inputs = inputs.squeeze(1)
-
         inputs = inputs * self.scale
         if self.embed_fn_fine is not None:
             inputs = self.embed_fn_fine(inputs)
+
+        inputs = inputs.unsqueeze(1)
+        # print(f'inputs.shape: {inputs.shape}')
+        inputs = self.attention(inputs)
+        inputs = inputs.squeeze(1)
 
         x = inputs
         for l in range(0, self.num_layers - 1):
